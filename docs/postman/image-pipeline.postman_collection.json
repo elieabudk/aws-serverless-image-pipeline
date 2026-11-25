@@ -1,0 +1,160 @@
+{
+  "info": {
+    "name": "Image Pipeline",
+    "description": "Pruebas end-to-end del pipeline serverless de imágenes.\n\n1. Rellena las variables de la colección `api` y `clientId` con los outputs de Terraform (`terraform output`), y `username`/`password` con el usuario creado en Cognito.\n2. Ejecuta las peticiones en orden. Las peticiones 2 y 3 deben enviarse seguidas: la firma del Presigned POST caduca en 5 minutos.\n3. En la petición 3, selecciona tu imagen (JPEG o PNG, máx. 5 MB) en la fila `file`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "api", "value": "", "type": "string" },
+    { "key": "clientId", "value": "", "type": "string" },
+    { "key": "username", "value": "demo-user", "type": "string" },
+    { "key": "password", "value": "", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "uploadUrl", "value": "", "type": "string" },
+    { "key": "imageId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1 - Login Cognito",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Login correcto (200)\", () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set(\"token\", pm.response.json().AuthenticationResult.AccessToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-amz-json-1.1" },
+          { "key": "X-Amz-Target", "value": "AWSCognitoIdentityProviderService.InitiateAuth" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"AuthFlow\": \"USER_PASSWORD_AUTH\",\n  \"ClientId\": \"{{clientId}}\",\n  \"AuthParameters\": { \"USERNAME\": \"{{username}}\", \"PASSWORD\": \"{{password}}\" }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "https://cognito-idp.eu-west-1.amazonaws.com/"
+      }
+    },
+    {
+      "name": "2 - Get upload URL",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"URL de subida generada (201)\", () => pm.response.to.have.status(201));",
+              "const r = pm.response.json();",
+              "pm.collectionVariables.set(\"uploadUrl\", r.uploadUrl);",
+              "pm.collectionVariables.set(\"imageId\", r.imageId);",
+              "Object.entries(r.fields).forEach(([k, v]) => pm.collectionVariables.set(\"f_\" + k, v));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"fileName\": \"foto.jpg\", \"contentType\": \"image/jpeg\" }",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{api}}"
+      }
+    },
+    {
+      "name": "2b - Sin token (debe dar 401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test(\"Rechazado sin JWT (401)\", () => pm.response.to.have.status(401));"]
+          }
+        }
+      ],
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"fileName\": \"foto.jpg\", \"contentType\": \"image/jpeg\" }",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{api}}"
+      }
+    },
+    {
+      "name": "2c - Formato no permitido (debe dar 415)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test(\"Formato rechazado (415)\", () => pm.response.to.have.status(415));"]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"fileName\": \"anim.gif\", \"contentType\": \"image/gif\" }",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{api}}"
+      }
+    },
+    {
+      "name": "3 - Upload to S3 (Presigned POST)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test(\"Imagen subida a S3 (204)\", () => pm.response.to.have.status(204));"]
+          }
+        }
+      ],
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "key", "value": "{{f_key}}", "type": "text" },
+            { "key": "Content-Type", "value": "{{f_Content-Type}}", "type": "text" },
+            { "key": "bucket", "value": "{{f_bucket}}", "type": "text" },
+            { "key": "X-Amz-Algorithm", "value": "{{f_X-Amz-Algorithm}}", "type": "text" },
+            { "key": "X-Amz-Credential", "value": "{{f_X-Amz-Credential}}", "type": "text" },
+            { "key": "X-Amz-Date", "value": "{{f_X-Amz-Date}}", "type": "text" },
+            { "key": "X-Amz-Security-Token", "value": "{{f_X-Amz-Security-Token}}", "type": "text" },
+            { "key": "Policy", "value": "{{f_Policy}}", "type": "text" },
+            { "key": "X-Amz-Signature", "value": "{{f_X-Amz-Signature}}", "type": "text" },
+            { "key": "file", "type": "file", "src": [], "description": "Debe ser SIEMPRE el último campo del formulario" }
+          ]
+        },
+        "url": "{{uploadUrl}}"
+      }
+    }
+  ]
+}
